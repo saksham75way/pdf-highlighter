@@ -39,7 +39,19 @@ export interface Citation {
   boxes: HighlightBox[]
 }
 
+export interface TokenUsage {
+  model: string
+  mode: UploadMode
+  prompt_tokens: number
+  completion_tokens: number
+  reasoning_tokens: number | null
+  total_tokens: number
+  /** Extract mode only: pages whose text was sent to the model. */
+  pages_sent: number | null
+}
+
 export interface QueryResponse {
   answer: string
   citations: Citation[]
+  usage: TokenUsage | null
 }

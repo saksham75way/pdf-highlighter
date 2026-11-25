@@ -1,7 +1,7 @@
-import { AlertCircle, ExternalLink, FileText, Loader2, Quote, Search, Upload } from 'lucide-react'
+import { AlertCircle, Coins, ExternalLink, FileText, Loader2, Quote, Search, Upload } from 'lucide-react'
 import { Fragment, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { highlightedPdfUrl } from '../api'
-import type { Citation, QueryResponse, UploadMode, UploadResponse } from '../types'
+import type { Citation, QueryResponse, TokenUsage, UploadMode, UploadResponse } from '../types'
 
 interface Props {
   doc: UploadResponse | null
@@ -236,6 +236,8 @@ export default function QueryPanel(p: Props) {
                 </ul>
               </div>
             )}
+
+            {p.result.usage && <UsageDetails usage={p.result.usage} />}
           </section>
         )}
       </div>
@@ -278,5 +280,43 @@ function AnswerText({
         )
       })}
     </>
+  )
+}
+
+/** Collapsible token usage for the last request (what the model reported). */
+function UsageDetails({ usage }: { usage: TokenUsage }) {
+  const fmt = (n: number) => n.toLocaleString()
+  const rows: [string, string, string?][] = [
+    ['Input (prompt)', fmt(usage.prompt_tokens), 'Instructions + document + your question'],
+    ['Output (answer)', fmt(usage.completion_tokens), 'The answer and citations the model wrote'],
+  ]
+  if (usage.reasoning_tokens)
+    rows.push(['Thinking', fmt(usage.reasoning_tokens), 'Hidden reasoning tokens, billed as output'])
+  return (
+    <details className="group rounded-lg border border-slate-200 text-sm">
+      <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-2 text-slate-600 hover:bg-slate-50">
+        <span className="flex items-center gap-1.5">
+          <Coins size={14} className="text-slate-400" />
+          Token usage
+        </span>
+        <span className="tabular-nums text-slate-500">{fmt(usage.total_tokens)} total</span>
+      </summary>
+      <dl className="space-y-1.5 border-t border-slate-200 px-3 py-2.5">
+        {rows.map(([label, value, hint]) => (
+          <div key={label} className="flex items-baseline justify-between gap-3" title={hint}>
+            <dt className="text-slate-500">{label}</dt>
+            <dd className="tabular-nums font-medium text-slate-800">{value}</dd>
+          </div>
+        ))}
+        <div className="flex items-baseline justify-between gap-3 border-t border-slate-100 pt-1.5">
+          <dt className="font-medium text-slate-600">Total</dt>
+          <dd className="tabular-nums font-semibold text-slate-900">{fmt(usage.total_tokens)}</dd>
+        </div>
+        <p className="pt-1 text-xs text-slate-400">
+          {usage.model} · {usage.mode === 'direct' ? 'PDF sent as a file' : 'text lines sent'}
+          {usage.pages_sent != null && ` · ${usage.pages_sent} pages`}
+        </p>
+      </dl>
+    </details>
   )
 }

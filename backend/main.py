@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from pathlib import Path
@@ -19,6 +20,8 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 import llm_service
 from extractor import extract_layout, page_sizes_only
 from models import DocLayout, PageSize, QueryRequest, QueryResponse, UploadResponse
+
+log = logging.getLogger("uvicorn.error")  # shows up in the uvicorn console
 
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -116,6 +119,7 @@ def query(req: QueryRequest) -> QueryResponse:
     except HTTPException:
         raise
     except Exception as exc:
+        log.warning("LLM request failed (%s, mode=%s): %s", type(exc).__name__, layout.mode, exc)
         raise HTTPException(502, f"LLM request failed: {exc}") from exc
 
 

@@ -29,6 +29,7 @@ from models import (
     LLMAnswer,
     Line,
     QueryResponse,
+    TokenUsage,
 )
 
 SYSTEM_PROMPT = """You answer questions about a PDF using ONLY the text provided.
@@ -118,7 +119,23 @@ def answer_query(layout: DocLayout, query: str) -> QueryResponse:
     if parsed is None:
         raise RuntimeError(f"Model returned no structured output (refusal: {msg.refusal!r})")
 
-    return resolve_citations(layout, parsed)
+    result = resolve_citations(layout, parsed)
+    u = completion.usage
+    if u is not None:
+        details = getattr(u, "completion_tokens_details", None)
+        result.usage = TokenUsage(
+            model=_model(),
+            mode="extract",
+            prompt_tokens=u.prompt_tokens,
+            completion_tokens=u.completion_tokens,
+            # Gemini's OpenAI-compatible API folds hidden thinking into total_tokens without
+            # listing it; derive it so the breakdown adds up.
+            reasoning_tokens=(getattr(details, "reasoning_tokens", None) if details else None)
+            or (u.total_tokens - u.prompt_tokens - u.completion_tokens or None),
+            total_tokens=u.total_tokens,
+            pages_sent=len(re.findall(r"^--- Page \d+ ---$", context, flags=re.M)),
+        )
+    return result
 
 
 def resolve_citations(layout: DocLayout, parsed: LLMAnswer) -> QueryResponse:
@@ -265,7 +282,18 @@ def answer_query_direct(layout: DocLayout, pdf_path: Path, query: str) -> QueryR
         reason = (data.get("promptFeedback") or {}).get("blockReason") or "no candidates"
         raise RuntimeError(f"Gemini returned no answer ({reason})") from None
     parsed = DirectAnswer.model_validate_json(text)
-    return resolve_direct_citations(layout, parsed)
+    result = resolve_direct_citations(layout, parsed)
+    um = data.get("usageMetadata")
+    if um:
+        result.usage = TokenUsage(
+            model=model,
+            mode="direct",
+            prompt_tokens=um.get("promptTokenCount", 0),
+            completion_tokens=um.get("candidatesTokenCount", 0),
+            reasoning_tokens=um.get("thoughtsTokenCount"),
+            total_tokens=um.get("totalTokenCount", 0),
+        )
+    return result
 
 
 def resolve_direct_citations(layout: DocLayout, parsed: DirectAnswer) -> QueryResponse:

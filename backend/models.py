@@ -89,9 +89,24 @@ class Citation(BaseModel):
     boxes: list[HighlightBox]
 
 
+class TokenUsage(BaseModel):
+    """Tokens billed for one /query request (what the model reported)."""
+
+    model: str
+    mode: str = Field(description="'extract' or 'direct'")
+    prompt_tokens: int = Field(description="Input: instructions + document + question")
+    completion_tokens: int = Field(description="Output: the answer JSON")
+    reasoning_tokens: int | None = Field(default=None, description="Hidden 'thinking' tokens, if reported")
+    total_tokens: int
+    pages_sent: int | None = Field(
+        default=None, description="Extract mode: pages whose text was sent (all, or the best-matching ones)"
+    )
+
+
 class QueryResponse(BaseModel):
     answer: str
     citations: list[Citation]
+    usage: TokenUsage | None = None
 
 
 # --------------------------------------------------------------------------- #
