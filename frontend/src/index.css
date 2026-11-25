@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f1f5f9;
+}
+
+/* Pulse the active highlight so the eye finds it after the scroll. */
+@keyframes hl-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+  100% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+}
+.hl-box {
+  animation: hl-pulse 0.9s ease-out 2;
+}
