@@ -7,9 +7,14 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from dotenv import load_dotenv
+import pymupdf
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+
+# Read backend/.env (OPENAI_API_KEY, OPENAI_BASE_URL, LLM_MODEL) before llm_service is used.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import llm_service
 from extractor import extract_layout
@@ -103,6 +108,55 @@ def query(req: QueryRequest) -> QueryResponse:
 def get_pdf(doc_id: str) -> FileResponse:
     _load_layout(doc_id)
     return FileResponse(_pdf_path(doc_id), media_type="application/pdf")
+
+
+MAX_HIGHLIGHT_BOXES = 200
+
+
+def _parse_boxes(raw: str) -> list[tuple[int, list[float]]]:
+    """'1:x0,y0,x1,y1;2:x0,y0,x1,y1' -> [(page, [x0, y0, x1, y1]), ...]"""
+    out: list[tuple[int, list[float]]] = []
+    try:
+        for part in raw.split(";"):
+            if not part:
+                continue
+            page_s, coords_s = part.split(":")
+            coords = [float(v) for v in coords_s.split(",")]
+            if len(coords) != 4 or not all(map(lambda v: v == v and abs(v) < 1e6, coords)):
+                raise ValueError
+            out.append((int(page_s), coords))
+    except ValueError:
+        raise HTTPException(400, "Bad 'boxes' parameter") from None
+    if not out or len(out) > MAX_HIGHLIGHT_BOXES:
+        raise HTTPException(400, "Provide 1-200 boxes")
+    return out
+
+
+@app.get("/pdf/{doc_id}/highlighted")
+def get_highlighted_pdf(doc_id: str, boxes: str = Query(..., max_length=20000)) -> Response:
+    """The original PDF with highlight annotations burned in, so it can be opened in a
+    plain browser tab (use '#page=N' on the URL to jump to the page).
+
+    ``boxes`` uses the same coordinates as the citation boxes: points, top-left origin,
+    rotation applied. They are mapped back to the page's unrotated space for the PDF."""
+    _load_layout(doc_id)
+    parsed = _parse_boxes(boxes)
+    with pymupdf.open(_pdf_path(doc_id)) as doc:
+        for pno, bbox in parsed:
+            if not 1 <= pno <= doc.page_count:
+                raise HTTPException(400, f"Page {pno} out of range")
+            page = doc[pno - 1]
+            rect = pymupdf.Rect(*bbox) * page.derotation_matrix
+            rect.normalize()
+            annot = page.add_highlight_annot(rect)
+            annot.set_colors(stroke=(1, 0.8, 0))
+            annot.update()
+        data = doc.tobytes(garbage=3, deflate=True)
+    return Response(
+        data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="highlighted.pdf"'},
+    )
 
 
 @app.get("/layout/{doc_id}", response_model=DocLayout)

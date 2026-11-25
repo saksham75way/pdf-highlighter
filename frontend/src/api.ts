@@ -1,4 +1,4 @@
-import type { QueryResponse, UploadResponse } from './types'
+import type { HighlightBox, QueryResponse, UploadResponse } from './types'
 
 export const API_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
@@ -33,3 +33,10 @@ export async function askQuestion(docId: string, query: string): Promise<QueryRe
 }
 
 export const pdfUrl = (docId: string) => `${API_URL}/pdf/${docId}`
+
+/** URL of the PDF with a citation's highlights baked in; opens at the first highlighted page. */
+export function highlightedPdfUrl(docId: string, boxes: HighlightBox[]): string {
+  const raw = boxes.map((b) => `${b.page}:${b.bbox.join(',')}`).join(';')
+  const page = boxes[0]?.page ?? 1
+  return `${API_URL}/pdf/${docId}/highlighted?boxes=${encodeURIComponent(raw)}#page=${page}`
+}

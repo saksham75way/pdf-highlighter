@@ -1,5 +1,6 @@
-import { AlertCircle, FileText, Loader2, Quote, Search, Upload } from 'lucide-react'
+import { AlertCircle, ExternalLink, FileText, Loader2, Quote, Search, Upload } from 'lucide-react'
 import { Fragment, useRef, useState, type DragEvent, type FormEvent } from 'react'
+import { highlightedPdfUrl } from '../api'
 import type { Citation, QueryResponse, UploadResponse } from '../types'
 
 interface Props {
@@ -169,6 +170,17 @@ export default function QueryPanel(p: Props) {
                           <span className="italic">{c.matched_text || c.quote}</span>
                         </div>
                       </button>
+                      {p.doc && (
+                        <a
+                          href={highlightedPdfUrl(p.doc.doc_id, c.boxes)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-flex items-center gap-1 px-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                        >
+                          <ExternalLink size={12} />
+                          Open highlighted PDF in new tab
+                        </a>
+                      )}
                     </li>
                   ))}
                 </ul>
