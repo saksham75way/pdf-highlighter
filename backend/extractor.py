@@ -79,6 +79,22 @@ def extract_layout(pdf_path: str, doc_id: str, filename: str) -> DocLayout:
     return DocLayout(doc_id=doc_id, filename=filename, pages=pages)
 
 
+def page_sizes_only(pdf_path: str, doc_id: str, filename: str) -> DocLayout:
+    """Direct mode: no text/word extraction, just each page's displayed size (points) so the
+    viewer can place overlay boxes. ``lines`` stay empty."""
+    pages: list[PageLayout] = []
+    with pymupdf.open(pdf_path) as doc:
+        if doc.needs_pass:
+            raise ValueError("PDF is password protected")
+        for pno, page in enumerate(doc, start=1):
+            pages.append(
+                PageLayout(page=pno, width=_r(page.rect.width), height=_r(page.rect.height), lines=[])
+            )
+    if not pages:
+        raise ValueError("PDF has no pages")
+    return DocLayout(doc_id=doc_id, filename=filename, pages=pages, mode="direct")
+
+
 # --------------------------------------------------------------------------- #
 # 2. Quote -> word-level boxes
 # --------------------------------------------------------------------------- #

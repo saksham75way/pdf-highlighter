@@ -3,6 +3,9 @@
 
 export type BBox = [number, number, number, number]
 
+/** 'extract': text + word boxes extracted (precise). 'direct': PDF sent to Gemini, boxes are AI guesses. */
+export type UploadMode = 'extract' | 'direct'
+
 export interface PageSize {
   page: number
   width: number
@@ -15,6 +18,7 @@ export interface UploadResponse {
   num_pages: number
   num_lines: number
   pages: PageSize[]
+  mode: UploadMode
 }
 
 export interface HighlightBox {
@@ -31,6 +35,7 @@ export interface Citation {
   matched_text: string
   match_quality: number
   precise: boolean
+  grounding: 'extracted' | 'model_estimate'
   boxes: HighlightBox[]
 }
 

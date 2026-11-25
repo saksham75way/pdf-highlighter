@@ -1,7 +1,7 @@
 import { AlertCircle, ExternalLink, FileText, Loader2, Quote, Search, Upload } from 'lucide-react'
 import { Fragment, useRef, useState, type DragEvent, type FormEvent } from 'react'
 import { highlightedPdfUrl } from '../api'
-import type { Citation, QueryResponse, UploadResponse } from '../types'
+import type { Citation, QueryResponse, UploadMode, UploadResponse } from '../types'
 
 interface Props {
   doc: UploadResponse | null
@@ -10,6 +10,8 @@ interface Props {
   error: string | null
   result: QueryResponse | null
   activeId: number | null
+  mode: UploadMode
+  onModeChange: (m: UploadMode) => void
   onUpload: (file: File) => void
   onAsk: (query: string) => void
   onSelect: (c: Citation) => void
@@ -40,6 +42,44 @@ export default function QueryPanel(p: Props) {
       </header>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        {/* Mode: applies to the next upload */}
+        <fieldset className="space-y-1.5">
+          <legend className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Upload mode
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                ['extract', 'Extract text', 'Precise highlights'],
+                ['direct', 'Send PDF to Gemini', 'No extraction, AI-guessed boxes'],
+              ] as const
+            ).map(([value, title, hint]) => (
+              <label
+                key={value}
+                className={`cursor-pointer rounded-lg border px-3 py-2 text-sm transition ${
+                  p.mode === value
+                    ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-200'
+                    : 'border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="upload-mode"
+                  value={value}
+                  checked={p.mode === value}
+                  onChange={() => p.onModeChange(value)}
+                  className="sr-only"
+                />
+                <div className="font-medium text-slate-900">{title}</div>
+                <div className="text-xs text-slate-500">{hint}</div>
+              </label>
+            ))}
+          </div>
+          {p.doc && p.doc.mode !== p.mode && (
+            <p className="text-xs text-slate-500">Applies to the next PDF you upload.</p>
+          )}
+        </fieldset>
+
         {/* Upload */}
         <div
           onDragOver={(e) => {
@@ -76,7 +116,9 @@ export default function QueryPanel(p: Props) {
               <>
                 <div className="truncate font-medium text-slate-900">{p.doc.filename}</div>
                 <div className="text-slate-500">
-                  {p.doc.num_pages} pages · {p.doc.num_lines} lines · click to replace
+                  {p.doc.num_pages} pages ·{' '}
+                  {p.doc.mode === 'direct' ? 'sent to Gemini as-is' : `${p.doc.num_lines} lines`} · click
+                  to replace
                 </div>
               </>
             ) : (
@@ -156,7 +198,15 @@ export default function QueryPanel(p: Props) {
                           <span>
                             Page {c.pages.length > 1 ? `${c.pages[0]}–${c.pages[c.pages.length - 1]}` : c.page}
                           </span>
-                          {!c.precise && (
+                          {c.grounding === 'model_estimate' && (
+                            <span
+                              className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800"
+                              title="The AI guessed where this text is on the page, so the highlight may be slightly off."
+                            >
+                              AI-estimated
+                            </span>
+                          )}
+                          {c.grounding !== 'model_estimate' && !c.precise && (
                             <span
                               className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-600"
                               title="The quote could not be located word-for-word, so whole lines are highlighted."

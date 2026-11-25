@@ -38,6 +38,9 @@ class DocLayout(BaseModel):
     doc_id: str
     filename: str
     pages: list[PageLayout]
+    # "extract": text + word boxes were extracted (precise highlights).
+    # "direct":  PDF is sent to Gemini as-is; only page sizes are stored (lines are empty).
+    mode: str = "extract"
 
 
 # --------------------------------------------------------------------------- #
@@ -55,6 +58,7 @@ class UploadResponse(BaseModel):
     num_pages: int
     num_lines: int
     pages: list[PageSize]
+    mode: str = "extract"
 
 
 class QueryRequest(BaseModel):
@@ -77,6 +81,11 @@ class Citation(BaseModel):
     match_quality: float = Field(ge=0, le=1, description="1.0 = verbatim word-level match")
     precise: bool = Field(description="True if boxes were refined to the quoted words, "
                                       "False if they fall back to whole lines")
+    grounding: str = Field(
+        default="extracted",
+        description="'extracted' = boxes computed from the PDF's own text layout; "
+                    "'model_estimate' = boxes guessed by the AI (direct mode), may be off",
+    )
     boxes: list[HighlightBox]
 
 
@@ -98,6 +107,22 @@ class LLMCitation(BaseModel):
         description="Verbatim span copied from those lines that supports the claim. "
                     "Do not paraphrase, add ellipses, or fix typos."
     )
+
+
+class DirectCitation(BaseModel):
+    """Direct mode: the model looks at the PDF itself and also guesses where the quote is."""
+
+    id: int
+    page: int = Field(description="1-based page number of the quote")
+    quote: str
+    boxes: list[list[int]] = Field(
+        description="[ymin, xmin, ymax, xmax] per line of the quote, 0-1000 relative to the page"
+    )
+
+
+class DirectAnswer(BaseModel):
+    answer: str
+    citations: list[DirectCitation]
 
 
 class LLMAnswer(BaseModel):

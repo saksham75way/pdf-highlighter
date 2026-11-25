@@ -9,7 +9,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 import pymupdf
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 
@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, Response
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import llm_service
-from extractor import extract_layout
+from extractor import extract_layout, page_sizes_only
 from models import DocLayout, PageSize, QueryRequest, QueryResponse, UploadResponse
 
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
@@ -58,10 +58,19 @@ def _load_layout(doc_id: str) -> DocLayout:
 
 
 @app.post("/upload", response_model=UploadResponse)
-async def upload(file: UploadFile = File(...)) -> UploadResponse:
+async def upload(
+    file: UploadFile = File(...),
+    mode: str = Form("extract"),
+) -> UploadResponse:
+    """mode='extract' (default): extract text + word boxes, precise highlights.
+    mode='direct': skip extraction, the PDF goes to Gemini as-is and the AI guesses the boxes."""
+    if mode not in ("extract", "direct"):
+        raise HTTPException(400, "mode must be 'extract' or 'direct'")
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "PDF too large (50 MB max)")
+    if mode == "direct" and len(data) > llm_service.MAX_DIRECT_PDF_BYTES:
+        raise HTTPException(413, "Direct mode supports PDFs up to 15 MB")
     if not data.startswith(b"%PDF"):
         raise HTTPException(400, "File is not a PDF")
 
@@ -69,13 +78,16 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
     pdf = _pdf_path(doc_id)
     pdf.write_bytes(data)
     try:
-        layout = extract_layout(str(pdf), doc_id, file.filename or "document.pdf")
+        if mode == "direct":
+            layout = page_sizes_only(str(pdf), doc_id, file.filename or "document.pdf")
+        else:
+            layout = extract_layout(str(pdf), doc_id, file.filename or "document.pdf")
     except Exception as exc:  # corrupt / encrypted PDFs
         pdf.unlink(missing_ok=True)
         raise HTTPException(422, f"Could not read PDF: {exc}") from exc
 
     n_lines = sum(len(p.lines) for p in layout.pages)
-    if n_lines == 0:
+    if mode == "extract" and n_lines == 0:
         pdf.unlink(missing_ok=True)
         raise HTTPException(
             422, "No selectable text found. Scanned PDFs need OCR first (e.g. ocrmypdf)."
@@ -89,6 +101,7 @@ async def upload(file: UploadFile = File(...)) -> UploadResponse:
         num_pages=len(layout.pages),
         num_lines=n_lines,
         pages=[PageSize(page=p.page, width=p.width, height=p.height) for p in layout.pages],
+        mode=layout.mode,
     )
 
 
@@ -97,6 +110,8 @@ def query(req: QueryRequest) -> QueryResponse:
     # Sync endpoint on purpose: the OpenAI client call blocks, FastAPI runs it in a threadpool.
     layout = _load_layout(req.doc_id)
     try:
+        if layout.mode == "direct":
+            return llm_service.answer_query_direct(layout, _pdf_path(req.doc_id), req.query)
         return llm_service.answer_query(layout, req.query)
     except HTTPException:
         raise
@@ -113,42 +128,39 @@ def get_pdf(doc_id: str) -> FileResponse:
 MAX_HIGHLIGHT_BOXES = 200
 
 
-def _parse_boxes(raw: str) -> list[tuple[int, list[float]]]:
-    """'1:x0,y0,x1,y1;2:x0,y0,x1,y1' -> [(page, [x0, y0, x1, y1]), ...]"""
-    out: list[tuple[int, list[float]]] = []
-    try:
-        for part in raw.split(";"):
-            if not part:
-                continue
-            page_s, coords_s = part.split(":")
-            coords = [float(v) for v in coords_s.split(",")]
-            if len(coords) != 4 or not all(map(lambda v: v == v and abs(v) < 1e6, coords)):
-                raise ValueError
-            out.append((int(page_s), coords))
-    except ValueError:
-        raise HTTPException(400, "Bad 'boxes' parameter") from None
-    if not out or len(out) > MAX_HIGHLIGHT_BOXES:
-        raise HTTPException(400, "Provide 1-200 boxes")
-    return out
-
-
 @app.get("/pdf/{doc_id}/highlighted")
-def get_highlighted_pdf(doc_id: str, boxes: str = Query(..., max_length=20000)) -> Response:
+def get_highlighted_pdf(
+    doc_id: str,
+    page: list[int] = Query(..., description="1-based page of each box"),
+    x0: list[float] = Query(..., description="left edge, PDF points"),
+    y0: list[float] = Query(..., description="top edge, PDF points"),
+    x1: list[float] = Query(..., description="right edge, PDF points"),
+    y1: list[float] = Query(..., description="bottom edge, PDF points"),
+) -> Response:
     """The original PDF with highlight annotations burned in, so it can be opened in a
-    plain browser tab (use '#page=N' on the URL to jump to the page).
+    plain browser tab (add '#page=N' to the URL to jump to the page).
 
-    ``boxes`` uses the same coordinates as the citation boxes: points, top-left origin,
-    rotation applied. They are mapped back to the page's unrotated space for the PDF."""
+    One box = one page/x0/y0/x1/y1 set, e.g. ``?page=6&x0=77.7&y0=81.6&x1=183&y1=94.3``.
+    For several boxes (a quote spanning lines) repeat all five names, in the same order.
+    Coordinates are the citation boxes': points, top-left origin, rotation applied; they
+    are mapped back to the page's unrotated space for the PDF."""
     _load_layout(doc_id)
-    parsed = _parse_boxes(boxes)
+    n = len(page)
+    if not (len(x0) == len(y0) == len(x1) == len(y1) == n):
+        raise HTTPException(400, "page, x0, y0, x1 and y1 must each be given once per box")
+    if not 1 <= n <= MAX_HIGHLIGHT_BOXES:
+        raise HTTPException(400, f"Provide 1-{MAX_HIGHLIGHT_BOXES} boxes")
+
     with pymupdf.open(_pdf_path(doc_id)) as doc:
-        for pno, bbox in parsed:
+        for pno, bx0, by0, bx1, by1 in zip(page, x0, y0, x1, y1):
             if not 1 <= pno <= doc.page_count:
                 raise HTTPException(400, f"Page {pno} out of range")
-            page = doc[pno - 1]
-            rect = pymupdf.Rect(*bbox) * page.derotation_matrix
+            if not all(v == v and abs(v) < 1e6 for v in (bx0, by0, bx1, by1)):  # rejects nan/inf
+                raise HTTPException(400, "Coordinates must be finite numbers")
+            pdf_page = doc[pno - 1]
+            rect = pymupdf.Rect(bx0, by0, bx1, by1) * pdf_page.derotation_matrix
             rect.normalize()
-            annot = page.add_highlight_annot(rect)
+            annot = pdf_page.add_highlight_annot(rect)
             annot.set_colors(stroke=(1, 0.8, 0))
             annot.update()
         data = doc.tobytes(garbage=3, deflate=True)

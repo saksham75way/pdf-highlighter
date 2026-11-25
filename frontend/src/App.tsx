@@ -3,13 +3,14 @@ import { useCallback, useMemo, useState } from 'react'
 import { askQuestion, pdfUrl, uploadPdf } from './api'
 import PdfViewer from './components/PdfViewer'
 import QueryPanel from './components/QueryPanel'
-import type { Citation, QueryResponse, UploadResponse } from './types'
+import type { Citation, QueryResponse, UploadMode, UploadResponse } from './types'
 
 export default function App() {
   const [doc, setDoc] = useState<UploadResponse | null>(null)
   const [result, setResult] = useState<QueryResponse | null>(null)
   const [activeId, setActiveId] = useState<number | null>(null)
   const [focusToken, setFocusToken] = useState(0)
+  const [mode, setMode] = useState<UploadMode>('extract')
   const [uploading, setUploading] = useState(false)
   const [asking, setAsking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +19,7 @@ export default function App() {
     setUploading(true)
     setError(null)
     try {
-      const d = await uploadPdf(file)
+      const d = await uploadPdf(file, mode)
       setDoc(d)
       setResult(null)
       setActiveId(null)
@@ -27,7 +28,7 @@ export default function App() {
     } finally {
       setUploading(false)
     }
-  }, [])
+  }, [mode])
 
   const onAsk = useCallback(
     async (query: string) => {
@@ -66,6 +67,8 @@ export default function App() {
           error={error}
           result={result}
           activeId={activeId}
+          mode={mode}
+          onModeChange={setMode}
           onUpload={onUpload}
           onAsk={onAsk}
           onSelect={onSelect}

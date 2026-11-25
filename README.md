@@ -18,6 +18,19 @@ viewer to the page and highlights the exact quoted words.
 4. **Rendering** (`frontend/src/components/PdfViewer.tsx`): boxes are positioned in percent of the
    page's point size, so they stay aligned at any zoom/window size.
 
+## Two upload modes
+
+Pick the mode in the left panel before uploading (`mode` field on `POST /upload`).
+
+| | **Extract text** (default) | **Send PDF to Gemini** (`direct`) |
+| --- | --- | --- |
+| Text extraction | PyMuPDF, every word gets an exact box | None. Only page sizes are read so the viewer can place overlays. |
+| What the model gets | Numbered text lines | The PDF file itself (Gemini native API, inline, up to 15 MB) |
+| Highlight boxes | Computed from the PDF, tight on the quoted words | **Guessed by the model** (`[ymin, xmin, ymax, xmax]`, 0-1000), shown with an "AI-estimated" badge; may be loose or slightly off |
+| Made-up quotes | Detected and dropped | Cannot be verified |
+| Scanned PDFs | Rejected (no text layer) | Works, the model reads the page images |
+| Needs | Any OpenAI-compatible model | A Gemini model and key (`GEMINI_API_KEY`, or `OPENAI_API_KEY` holding a Gemini key) |
+
 ## Run it
 
 Backend (Python 3.11+):
@@ -45,9 +58,10 @@ to `allow_origins` in `backend/main.py`.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| POST | `/upload` | multipart `file` → `{doc_id, filename, num_pages, num_lines, pages[]}` |
+| POST | `/upload` | multipart `file` (+ optional `mode`: `extract` \| `direct`) → `{doc_id, filename, num_pages, num_lines, pages[], mode}` |
 | POST | `/query` | `{doc_id, query}` → `{answer, citations[{id, page, boxes[], quote, matched_text, precise, …}]}` |
 | GET | `/pdf/{doc_id}` | the original PDF |
+| GET | `/pdf/{doc_id}/highlighted?page=6&x0=77.7&y0=81.6&x1=183&y1=94.3` | the PDF with highlight(s) burned in, for a new browser tab (repeat the five names for more boxes; add `#page=6` to jump) |
 | GET | `/layout/{doc_id}` | indexed lines + boxes (debugging) |
 
 ## Limitations
